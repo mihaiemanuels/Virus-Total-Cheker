@@ -1,0 +1,154 @@
+function Get-VirusTotalReport
+{
+    
+    param
+    (
+        [Parameter(Mandatory=$true)]
+        [String]$VTApiKey,
+        [Parameter(Mandatory=$true)]
+        [String]$SearchItem,
+        [ValidateSet('File','Hash','Url','IP','Domain')]
+        [String]$ScanType = 'Hash'
+    )
+    
+    #Choose type
+    switch($ScanType)
+    {
+        'File' { 
+            $SearchItem = (Get-FileHash $SearchItem).Hash 
+            
+            <#
+            $FileBytes = [io.File]::ReadAllBytes($SearchItem)
+            $HashAlgorithm = [Security.Cryptography.HashAlgorithm]::Create("SHA256")
+            $ComputeHash = $HashAlgorithm.ComputeHash($FileBytes)
+            $SearchItem2 = [System.Bitconverter]::ToString($ComputeHash).Replace('-','').ToUpper()
+            #>
+            
+            $ScanType = 'Hash'
+            $Uri = 'https://www.virustotal.com/vtapi/v2/file/report'
+            $Method = 'POST'
+            $Body = @{ resource = $SearchItem; apikey = $VTApiKey }
+            break 
+        }
+        'Hash' { 
+            $Uri = 'https://www.virustotal.com/vtapi/v2/file/report'
+            $Method = 'POST'
+            $Body = @{ resource = $SearchItem; apikey = $VTApiKey }
+            break 
+        }
+        'Url' { 
+            $Uri = 'https://www.virustotal.com/vtapi/v2/url/report'
+            $Method = 'POST'
+            $Body = @{ resource = $SearchItem; apikey = $VTApiKey }
+            break 
+        }
+        'IP' { 
+            $Uri = 'http://www.virustotal.com/vtapi/v2/ip-address/report'
+            $Method = 'GET'
+            $Body = @{ ip = $SearchItem; apikey = $VTApiKey }
+            break 
+        }
+        'Domain' { 
+            $Uri = 'http://www.virustotal.com/vtapi/v2/domain/report'
+            $Method = 'GET'
+            $Body = @{ domain = $SearchItem; apikey = $VTApiKey }
+            break 
+        }
+    }
+
+    #Get report
+    $VTReport = Invoke-RestMethod -Method $Method -Uri $Uri -Body $Body
+    
+    #Add custom content
+    switch($ScanType)
+    {
+        'Hash' {
+            $VTReportScans = @()
+            if ($VTReport.positives -gt 0) 
+            {
+                foreach($ScanName in ($VTReport.scans | Get-Member -Type NoteProperty | Select-Object -exp Name)) 
+                {
+                    if($VTReport.scans.$ScanName.detected)
+                    {
+                        $VTReportScan = $VTReport.scans.$ScanName
+                        $VTReportScan | Add-Member -MemberType NoteProperty -Name avname -Value $ScanName -Force
+                        $VTReportScans += $VTReportScan
+                    }
+                }
+            }
+
+            $VTReport | Add-Member -MemberType NoteProperty -Name avscans -Value $VTReportScans -Force
+            $VTReport | Add-Member -MemberType NoteProperty -Name avresult -Value "$($VTReport.positives)/$($VTReport.total)" -Force
+            break 
+        }
+        'Url' {
+            $VTReportScans = @()
+            if ($VTReport.positives -gt 0) 
+            {
+                foreach($ScanName in ($VTReport.scans | Get-Member -Type NoteProperty | Select-Object -exp Name)) 
+                {
+                    if($VTReport.scans.$ScanName.detected)
+                    {
+                        $VTReportScan = $VTReport.scans.$ScanName
+                        $VTReportScan | Add-Member -MemberType NoteProperty -Name avname -Value $ScanName -Force
+                        $VTReportScans += $VTReportScan
+                    }
+                }
+            }
+
+            $VTReport | Add-Member -MemberType NoteProperty -Name avscans -Value $VTReportScans -Force
+            $VTReport | Add-Member -MemberType NoteProperty -Name avresult -Value "$($VTReport.positives)/$($VTReport.total)" -Force
+            break 
+        }
+    }
+    
+    Return $VTReport
+}
+
+#(Get-VirusTotalReport -VTApiKey "de0843672387edfb095f25c6297163d9acc2ae4497e639fba508b6c371c7b9b8" -SearchItem "6cfe33ea14a4758043dd95ef9aed19ca6940d5245cee809f1c4b35b9fe78c1a0").avscans
+
+$mainPath = $PSScriptRoot + "\Files"
+
+$files = Get-ChildItem -Path $mainPath -Exclude "*.ps1"
+
+$fileCount = ($files | Measure-Object).Count
+
+if(Test-Path -Path $PSScriptRoot\Reports.txt){
+	Remove-Item -Path $PSScriptRoot\Reports.txt -Force
+}
+
+if($fileCount -eq 1){
+    $filePath = $PSScriptRoot + '\Files\'+ $files.Name
+    $fileHash = (Get-FileHash -Path $filePath -Algorithm SHA256).Hash
+    $Result = Get-VirusTotalReport -VTApiKey "de0843672387edfb095f25c6297163d9acc2ae4497e639fba508b6c371c7b9b8" -SearchItem $fileHash
+        
+    "|==============Report===============|" >> "$PSScriptRoot\Reports.txt"
+
+      "    File Name: $files" >> "$PSScriptRoot\Reports.txt"
+
+      "    AVResult:" + $Result.avresult >> "$PSScriptRoot\Reports.txt"
+      "    Positives:" +  $Result.positives >> "$PSScriptRoot\Reports.txt"
+      "   " + $Result.scans >> "$PSScriptRoot\Reports.txt"
+	  "   VirusTotal Link:" + $Result.permalink >> "$PSScriptRoot\Reports.txt"
+    "|===================================|" >> "$PSScriptRoot\Reports.txt"
+    "" >> "$PSScriptRoot\Reports.txt"
+
+}elseif($fileCount -gt 1){
+    for($i=0; $i -lt $fileCount; $i++){
+        $filePath = $PSScriptRoot + '\Files\'+ $files[$i].Name
+        $fileHash = (Get-FileHash -Path $filePath -Algorithm SHA256).Hash
+         
+        $Result = Get-VirusTotalReport -VTApiKey "de0843672387edfb095f25c6297163d9acc2ae4497e639fba508b6c371c7b9b8" -SearchItem $fileHash
+        
+       "|==============Report===============|" >> "$PSScriptRoot\Reports.txt"
+        
+       "   File Name: $filePath" >> "$PSScriptRoot\Reports.txt"
+       "   AVResult:" + $Result.avresult >> "$PSScriptRoot\Reports.txt"
+       "   Positives:" +  $Result.positives >> "$PSScriptRoot\Reports.txt"
+       "   " + $Result.scans >> "$PSScriptRoot\Reports.txt"
+        #$Result >> "$PSScriptRoot\Reports.txt"
+	   "   VirusTotal Link:" + $Result.permalink >> "$PSScriptRoot\Reports.txt"
+       "|===================================|"  >> "$PSScriptRoot\Reports.txt"
+       "" >> "$PSScriptRoot\Reports.txt"
+    }
+}
